@@ -1,6 +1,8 @@
 import { signal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { Collection, CollectionItem } from "../shared/types";
+import { isErrorResponse } from "../shared/dispatch";
+import { logErr } from "../shared/logger";
 
 const collections = signal<Collection[]>([]);
 const selectedCollection = signal<Collection | null>(null);
@@ -19,6 +21,10 @@ export function CollectionsPanel() {
       { type: "GET_COLLECTIONS" },
       (resp: { collections?: Collection[]; counts?: Record<number, number> } | null) => {
         loading.value = false;
+        if (isErrorResponse(resp)) {
+          logErr("Popup", `GET_COLLECTIONS fehlgeschlagen: ${resp.error}`);
+          return;
+        }
         if (resp?.collections) collections.value = resp.collections;
         if (resp?.counts) itemCounts.value = resp.counts;
       }
@@ -37,6 +43,10 @@ export function CollectionsPanel() {
       { type: "GET_COLLECTION_ITEMS", collectionId, offset: page * ITEMS_PER_PAGE, limit: ITEMS_PER_PAGE },
       (resp: { items?: CollectionItem[]; atEnd?: boolean } | null) => {
         loadingItems.value = false;
+        if (isErrorResponse(resp)) {
+          logErr("Popup", `GET_COLLECTION_ITEMS fehlgeschlagen: ${resp.error}`);
+          return;
+        }
         if (resp?.items) {
           items.value = reset ? resp.items : [...items.value, ...resp.items];
           allItemsLoaded.value = !!resp.atEnd;

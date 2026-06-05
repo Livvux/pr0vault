@@ -7,6 +7,7 @@
     "dev": "vite build --watch & vite build --watch --config vite.content.config.ts & vite build --watch --config vite.page-hook.config.ts",
     "build": "tsc && vite build && vite build --config vite.content.config.ts && vite build --config vite.page-hook.config.ts",
     "build:icons": "node scripts/build-icons.mjs",
+    "test": "vitest run",
     "prebuild": "pnpm run build:icons",
     "predev": "pnpm run build:icons",
     "release": "node scripts/release.mjs"
@@ -23,7 +24,8 @@
     "@types/chrome": "^0.0.313",
     "sharp": "^0.33.5",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^4.1.8"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

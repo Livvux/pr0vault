@@ -93,6 +93,20 @@ export interface VaultStats {
   lastSync: number | null;
 }
 
+export function isVaultStats(v: unknown): v is VaultStats {
+  if (!v || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  return (
+    typeof s.uploads === "number" &&
+    typeof s.comments === "number" &&
+    typeof s.filters === "number" &&
+    typeof s.collections === "number" &&
+    typeof s.messages === "number" &&
+    typeof s.storageBytes === "number" &&
+    (s.lastSync === null || typeof s.lastSync === "number")
+  );
+}
+
 export interface ExportData {
   exportDate: string;
   pr0VaultVersion: string;

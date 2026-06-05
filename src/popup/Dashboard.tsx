@@ -1,6 +1,7 @@
 import { signal } from "@preact/signals";
 import type { VaultStats } from "../shared/types";
 import type { SyncProgressMessage } from "../shared/messages";
+import { isErrorResponse } from "../shared/dispatch";
 
 interface Props {
   stats: VaultStats;
@@ -65,7 +66,9 @@ export function Dashboard({ stats, syncState, syncProgress }: Props) {
         type: "SYNC_START",
         scope: "all",
       });
-      if (response) {
+      if (isErrorResponse(response)) {
+        syncState.value = "error";
+      } else {
         syncState.value = "idle";
       }
     } catch {
