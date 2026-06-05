@@ -5,6 +5,8 @@ import { ExportPanel } from "./Export";
 import { CollectionsPanel } from "./Collections";
 import { LogPanel } from "./Log";
 import type { VaultStats } from "../shared/types";
+import { isErrorResponse } from "../shared/dispatch";
+import { logErr } from "../shared/logger";
 import type {
   SyncProgressMessage,
   SyncCompleteMessage,
@@ -26,6 +28,10 @@ const syncProgress = signal<SyncProgressMessage | null>(null);
 function refreshStats() {
   chrome.runtime.sendMessage({ type: "GET_STATS" }, (response) => {
     if (chrome.runtime.lastError) return;
+    if (isErrorResponse(response)) {
+      logErr("Popup", `GET_STATS fehlgeschlagen: ${response.error}`);
+      return; // Default-Nullen behalten → kein Crash, sauberer Empty-State
+    }
     if (response) stats.value = response as VaultStats;
   });
 }

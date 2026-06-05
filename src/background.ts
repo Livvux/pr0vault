@@ -5,6 +5,7 @@ import { db } from "./shared/db";
 import Fuse from "fuse.js";
 import JSZip from "jszip";
 import { logSync, logErr } from "./shared/logger";
+import { respondAsync } from "./shared/dispatch";
 import type {
   VaultMessage,
   VaultResponse,
@@ -42,85 +43,78 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // ---- Message Router ----
 
-chrome.runtime.onMessage.addListener(
-  (msg: VaultMessage, _sender, sendResponse: (r: VaultResponse) => void) => {
-    switch (msg.type) {
-      case "STORE_BATCH":
-        handleStoreBatch(msg.payload);
-        sendResponse({ success: true });
-        break;
+async function routeMessage(msg: VaultMessage): Promise<VaultResponse> {
+  switch (msg.type) {
+    case "STORE_BATCH":
+      // Bewusste Ausnahme: sofort antworten, DB-Schreibung läuft detached.
+      handleStoreBatch(msg.payload).catch((e) =>
+        logErr("SW", `StoreBatch error: ${String(e)}`)
+      );
+      return { success: true };
 
-      case "SYNC_START":
-        logSync("SW", `Sync gestartet: ${msg.scope}`);
-        handleSyncStart(msg.scope).then((stats) => {
-          logSync("SW", `Sync fertig: ${JSON.stringify(stats)}`);
-          sendResponse(stats);
-        }).catch(e => {
-          logErr("SW", `Sync Fehler: ${String(e)}`);
-          sendResponse({ success: false, error: String(e) });
-        });
-        break;
-
-      case "QUERY_SEARCH":
-        handleSearch(msg.query, msg.limit ?? 50).then((results) =>
-          sendResponse({ results })
-        );
-        break;
-
-      case "GET_STATS":
-        getStats().then((stats) => sendResponse(stats));
-        break;
-
-      case "EXPORT":
-        handleExport(msg.format, msg.scope).then((result) =>
-          sendResponse(result)
-        );
-        break;
-
-      case "CACHE_THUMB":
-        (async () => {
-          try {
-            const binary = Uint8Array.from(atob(msg.blobBase64), c => c.charCodeAt(0));
-            const blob = new Blob([binary], { type: "image/jpeg" });
-            await db.collectionItems
-              .where("itemId")
-              .equals(msg.itemId)
-              .modify({ thumbBlob: blob });
-          } catch (e) {
-            logErr("SW", `Thumb cache error: ${String(e)}`);
-          }
-          sendResponse({ success: true });
-        })();
-        break;
-
-      case "GET_COLLECTIONS":
-        (async () => {
-          const cols = await db.collections.toArray();
-          const counts: Record<number, number> = {};
-          for (const col of cols) {
-            counts[col.id] = await db.collectionItems.where("collectionId").equals(col.id).count();
-          }
-          sendResponse({ collections: cols, counts });
-        })();
-        break;
-
-      case "GET_COLLECTION_ITEMS":
-        (async () => {
-          const items = await db.collectionItems
-            .where("collectionId")
-            .equals(msg.collectionId)
-            .offset(msg.offset ?? 0)
-            .limit(msg.limit ?? 30)
-            .toArray();
-          const total = await db.collectionItems.where("collectionId").equals(msg.collectionId).count();
-          const atEnd = (msg.offset ?? 0) + items.length >= total;
-          sendResponse({ items, atEnd });
-        })();
-        break;
+    case "SYNC_START": {
+      logSync("SW", `Sync gestartet: ${msg.scope}`);
+      const stats = await handleSyncStart(msg.scope);
+      logSync("SW", `Sync fertig: ${JSON.stringify(stats)}`);
+      return stats;
     }
 
-    return true; // Keep channel open for async
+    case "QUERY_SEARCH":
+      return { results: await handleSearch(msg.query, msg.limit ?? 50) };
+
+    case "GET_STATS":
+      return await getStats();
+
+    case "EXPORT":
+      return await handleExport(msg.format, msg.scope);
+
+    case "CACHE_THUMB": {
+      const binary = Uint8Array.from(atob(msg.blobBase64), (c) =>
+        c.charCodeAt(0)
+      );
+      const blob = new Blob([binary], { type: "image/jpeg" });
+      await db.collectionItems
+        .where("itemId")
+        .equals(msg.itemId)
+        .modify({ thumbBlob: blob });
+      return { success: true };
+    }
+
+    case "GET_COLLECTIONS": {
+      const cols = await db.collections.toArray();
+      const counts: Record<number, number> = {};
+      for (const col of cols) {
+        counts[col.id] = await db.collectionItems
+          .where("collectionId")
+          .equals(col.id)
+          .count();
+      }
+      return { collections: cols, counts };
+    }
+
+    case "GET_COLLECTION_ITEMS": {
+      const items = await db.collectionItems
+        .where("collectionId")
+        .equals(msg.collectionId)
+        .offset(msg.offset ?? 0)
+        .limit(msg.limit ?? 30)
+        .toArray();
+      const total = await db.collectionItems
+        .where("collectionId")
+        .equals(msg.collectionId)
+        .count();
+      const atEnd = (msg.offset ?? 0) + items.length >= total;
+      return { items, atEnd };
+    }
+
+    default:
+      return; // SW→Popup/CS-Typen: respondAsync sendet undefined → Channel sofort schließen
   }
+}
+
+chrome.runtime.onMessage.addListener(
+  (msg: VaultMessage, _sender, sendResponse: (r: VaultResponse) => void) =>
+    respondAsync(() => routeMessage(msg), msg.type, sendResponse)
 );
 
 // ---- Store Batch ----
