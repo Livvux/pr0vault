@@ -32,6 +32,8 @@ describe("respondAsync", () => {
       sendResponse
     );
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(1));
+    // Einen Tick warten, damit ein etwaiger verspäteter Zweitaufruf sichtbar würde
+    await new Promise((r) => setTimeout(r, 0));
     expect(sendResponse).toHaveBeenCalledTimes(1);
   });
 
