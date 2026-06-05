@@ -21,12 +21,23 @@ export function respondAsync(
   msgType: string,
   sendResponse: (r: VaultResponse) => void
 ): true {
+  let sent = false;
+  const safeSend = (r: VaultResponse) => {
+    if (sent) return;
+    sent = true;
+    try {
+      sendResponse(r);
+    } catch (e) {
+      // Toter Channel (z. B. Popup geschlossen): nicht eskalieren, nur loggen.
+      logErr("SW", `sendResponse failed [${msgType}]: ${String(e)}`);
+    }
+  };
   route()
-    .then((res) => sendResponse(res))
+    .then((res) => safeSend(res))
     .catch((e) => {
       logErr("SW", `Handler error [${msgType}]: ${String(e)}`);
       const err: ErrorResponse = { success: false, error: String(e) };
-      sendResponse(err);
+      safeSend(err);
     });
   return true; // Channel offen halten für async-Antwort
 }

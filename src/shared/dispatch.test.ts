@@ -37,6 +37,23 @@ describe("respondAsync", () => {
     expect(sendResponse).toHaveBeenCalledTimes(1);
   });
 
+  it("ruft sendResponse nicht erneut auf, wenn der erste Aufruf wirft", async () => {
+    const sendResponse = vi.fn(() => {
+      throw new Error("disconnected port");
+    });
+    expect(() =>
+      respondAsync(
+        () => Promise.resolve({ success: true }),
+        "STORE_BATCH",
+        sendResponse
+      )
+    ).not.toThrow();
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(1));
+    // Einen Tick warten, damit ein etwaiger verspäteter Zweitaufruf sichtbar würde
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sendResponse).toHaveBeenCalledTimes(1);
+  });
+
   it("gibt synchron true zurück (Channel offen halten)", () => {
     const result = respondAsync(
       () => Promise.resolve(undefined),
