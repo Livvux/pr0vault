@@ -7,6 +7,11 @@ import type { VaultResponse } from "./messages";
 
 export type ErrorResponse = { success: false; error: string };
 
+// Achtung: matcht JEDE { success:false, error }-Form — sowohl die von
+// respondAsync erzeugte Transport-Fehlerhülle als auch legitime fachliche
+// Misserfolge (z. B. handleExport returnt success:false bewusst als Ergebnis).
+// Daher NICHT auf den EXPORT-Pfad anwenden, wo success:false ein anzuzeigendes
+// Resultat ist, kein Transportfehler.
 export function isErrorResponse(r: unknown): r is ErrorResponse {
   return (
     !!r &&

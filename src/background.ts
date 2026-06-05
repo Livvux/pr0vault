@@ -108,7 +108,9 @@ async function routeMessage(msg: VaultMessage): Promise<VaultResponse> {
     }
 
     default:
-      return; // SW→Popup/CS-Typen: respondAsync sendet undefined → Channel sofort schließen
+      // Unbekannter / nicht hier behandelter Typ: respondAsync hält den Channel
+      // (return true) und antwortet mit undefined.
+      return;
   }
 }
 
