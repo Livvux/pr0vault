@@ -1,3 +1,4 @@
+import {browser} from "../shared/browser";
 import { signal, effect } from "@preact/signals";
 import { Dashboard } from "./Dashboard";
 import { Search } from "./Search";
@@ -9,6 +10,7 @@ import type {
   SyncProgressMessage,
   SyncCompleteMessage,
 } from "../shared/messages";
+
 
 const activeTab = signal<"dashboard" | "search" | "export" | "collections" | "log">("dashboard");
 const stats = signal<VaultStats>({
@@ -24,14 +26,13 @@ const syncState = signal<"idle" | "syncing" | "error">("idle");
 const syncProgress = signal<SyncProgressMessage | null>(null);
 
 function refreshStats() {
-  chrome.runtime.sendMessage({ type: "GET_STATS" }, (response) => {
-    if (chrome.runtime.lastError) return;
+  browser.runtime.sendMessage({ type: "GET_STATS" }).then((response: any) => {
     if (response) stats.value = response as VaultStats;
-  });
+  }).catch(() => {});
 }
 
 // Listen for progress/completion from service worker via runtime
-chrome.runtime.onMessage.addListener((msg) => {
+browser.runtime.onMessage.addListener((msg: any) => {
   if (msg.type === "SYNC_PROGRESS") {
     syncProgress.value = msg as SyncProgressMessage;
   }
@@ -46,7 +47,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 refreshStats();
 
 // Load and apply accent color from settings
-chrome.storage.local.get("accentColor", (data) => {
+browser.storage.local.get("accentColor").then((data: any) => {
   if (data.accentColor) {
     document.documentElement.style.setProperty("--accent-blue", data.accentColor);
   }
@@ -81,7 +82,7 @@ export function App() {
           height="24"
         />
         <span class="title">pr0Vault</span>
-        <button class="settings-btn" title="Optionen" onClick={() => chrome.runtime.openOptionsPage()}>⚙</button>
+        <button class="settings-btn" title="Optionen" onClick={() => browser.runtime.openOptionsPage()}>⚙</button>
         <span class="storage">{formatBytes(stats.value.storageBytes)}</span>
         <span class="sync-indicator" title={formatDate(stats.value.lastSync)}>
           {syncState.value === "syncing" ? "⚡" : "●"}

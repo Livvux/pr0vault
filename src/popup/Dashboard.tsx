@@ -1,6 +1,7 @@
-import { signal } from "@preact/signals";
-import type { VaultStats } from "../shared/types";
-import type { SyncProgressMessage } from "../shared/messages";
+import {browser} from "../shared/browser";
+import {signal} from "@preact/signals";
+import type {VaultStats} from "../shared/types";
+import type {SyncProgressMessage} from "../shared/messages";
 
 interface Props {
   stats: VaultStats;
@@ -11,16 +12,16 @@ interface Props {
 const autoSync = signal(false);
 
 // Load auto-sync setting
-chrome.storage.local.get("autoSync", (d) => { autoSync.value = !!d.autoSync; });
+browser.storage.local.get("autoSync").then((d: any) => { autoSync.value = !!d.autoSync; });
 
 function toggleAutoSync() {
   autoSync.value = !autoSync.value;
-  chrome.storage.local.set({ autoSync: autoSync.value });
+  browser.storage.local.set({ autoSync: autoSync.value });
   // Create/clear periodic alarm
   if (autoSync.value) {
-    chrome.alarms.create("pr0vault-sync", { periodInMinutes: 60 });
+    browser.alarms.create("pr0vault-sync", { periodInMinutes: 60 });
   } else {
-    chrome.alarms.clear("pr0vault-sync");
+    browser.alarms.clear("pr0vault-sync");
   }
 }
 
@@ -61,7 +62,7 @@ export function Dashboard({ stats, syncState, syncProgress }: Props) {
   async function startSync() {
     syncState.value = "syncing";
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await browser.runtime.sendMessage({
         type: "SYNC_START",
         scope: "all",
       });
@@ -143,7 +144,7 @@ export function Dashboard({ stats, syncState, syncProgress }: Props) {
             style={`background:${c}`}
             title={c}
             onClick={() => {
-              chrome.storage.local.set({ accentColor: c });
+              browser.storage.local.set({ accentColor: c });
               document.documentElement.style.setProperty("--accent-blue", c);
             }}
           />

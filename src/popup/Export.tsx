@@ -1,4 +1,5 @@
-import { signal } from "@preact/signals";
+import {browser} from "../shared/browser";
+import {signal} from "@preact/signals";
 
 const format = signal<"json" | "zip">("json");
 const scope = signal<"all" | "comments" | "uploads">("all");
@@ -12,12 +13,12 @@ export function ExportPanel() {
     exportResult.value = null;
 
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await browser.runtime.sendMessage({
         type: "EXPORT",
         format: format.value,
         scope: scope.value,
       });
-      exportResult.value = response;
+      exportResult.value = response as any;
     } catch (err) {
       exportResult.value = { success: false, error: String(err) };
     } finally {

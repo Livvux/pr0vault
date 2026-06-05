@@ -2,6 +2,8 @@
 // Centralized logging for Content Script, Service Worker, and Popup.
 // Logs are stored in chrome.storage.local (max 200 entries).
 
+import {browser} from "./browser";
+
 const LOG_KEY = "pr0vault_logs";
 const MAX_LOGS = 200;
 
@@ -15,12 +17,12 @@ export interface LogEntry {
 }
 
 async function readLogs(): Promise<LogEntry[]> {
-  const data = await chrome.storage.local.get(LOG_KEY);
+  const data = await browser.storage.local.get(LOG_KEY);
   return (data[LOG_KEY] as LogEntry[]) || [];
 }
 
 async function writeLogs(logs: LogEntry[]): Promise<void> {
-  await chrome.storage.local.set({ [LOG_KEY]: logs.slice(-MAX_LOGS) });
+  await browser.storage.local.set({ [LOG_KEY]: logs.slice(-MAX_LOGS) });
 }
 
 export async function log(
@@ -51,5 +53,5 @@ export async function getLogs(): Promise<LogEntry[]> {
 }
 
 export async function clearLogs(): Promise<void> {
-  await chrome.storage.local.remove(LOG_KEY);
+  await browser.storage.local.remove(LOG_KEY);
 }

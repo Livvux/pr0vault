@@ -1,5 +1,6 @@
-import { signal } from "@preact/signals";
-import { useEffect, useCallback } from "preact/hooks";
+import {browser} from "../shared/browser";
+import {signal} from "@preact/signals";
+import {useCallback, useEffect} from "preact/hooks";
 
 const query = signal("");
 const results = signal<{ score: number; item: { content: string; itemId?: number; name?: string; created?: number; _type?: string }; matches?: unknown[] }[]>([]);
@@ -19,21 +20,19 @@ export function Search() {
     searching.value = true;
     error.value = "";
 
-    chrome.runtime.sendMessage(
-      { type: "QUERY_SEARCH", query: q, limit: 50 },
-      (response) => {
-        searching.value = false;
-        if (chrome.runtime.lastError) {
-          error.value = chrome.runtime.lastError.message ?? "Unbekannter Fehler";
-          return;
-        }
-        if (response?.results) {
-          results.value = response.results as typeof results.value;
-        } else {
-          results.value = [];
-        }
+    browser.runtime.sendMessage(
+      { type: "QUERY_SEARCH", query: q, limit: 50 }
+    ).then((response: any) => {
+      searching.value = false;
+      if (response?.results) {
+        results.value = response.results as typeof results.value;
+      } else {
+        results.value = [];
       }
-    );
+    }).catch((err) => {
+      searching.value = false;
+      error.value = String(err);
+    });
   }, []);
 
   useEffect(() => {
@@ -50,7 +49,7 @@ export function Search() {
     const url = commentId
       ? `https://pr0gramm.com/new/${itemId}:comment${commentId}`
       : `https://pr0gramm.com/new/${itemId}`;
-    chrome.tabs.create({ url });
+    browser.tabs.create({ url });
   }
 
   function highlightText(text: string, matches: unknown[] | undefined): string {

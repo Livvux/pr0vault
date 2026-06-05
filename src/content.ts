@@ -9,6 +9,8 @@
 import type { Upload, Comment, Message, FilterBookmark, Collection, CollectionItem } from "./shared/types";
 import type { StoreBatchMessage } from "./shared/messages";
 import { logSync, logErr } from "./shared/logger";
+import {browser} from "./shared/browser";
+
 
 const HOOK_TAG = "PR0VAULT_API";
 
@@ -46,8 +48,9 @@ function flush() {
       payload: pendingBatch,
     };
     try {
-      chrome.runtime.sendMessage(msg, () => {
-        if (chrome.runtime.lastError) {
+
+      browser.runtime.sendMessage(msg, () => {
+        if (browser.runtime.lastError) {
           // SW might be inactive — silent.
         }
       });
@@ -210,7 +213,7 @@ window.addEventListener("message", (ev: MessageEvent) => {
 
 // ---- Active Sync Proxy ----
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+browser.runtime.onMessage.addListener((msg: any) => {
   if (msg.type === "FETCH_API") {
     const { endpoint, params } = msg;
     const url = new URL(`/api${endpoint}`, window.location.origin);
@@ -220,11 +223,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
     }
 
-    fetch(url.toString(), { credentials: "include" })
+    return fetch(url.toString(), { credentials: "include" })
       .then((r) => r.json())
-      .then(sendResponse)
-      .catch((err) => sendResponse({ error: String(err) }));
-
-    return true; // Keep message channel open for async response
+      .catch((err) => ({ error: String(err) }));
   }
+  return false;
 });

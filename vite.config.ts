@@ -1,7 +1,7 @@
-import { defineConfig } from "vite";
+import {defineConfig} from "vite";
 import preact from "@preact/preset-vite";
-import { resolve } from "node:path";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import {resolve} from "node:path";
+import {copyFileSync, existsSync, mkdirSync} from "node:fs";
 
 function copyAssets() {
   return {
@@ -22,6 +22,12 @@ function copyAssets() {
         if (existsSync(src)) {
           copyFileSync(src, resolve(iconsDir, `icon${size}.png`));
         }
+      }
+
+      // Copy polyfill
+      const polyfillSrc = resolve(root, "node_modules/webextension-polyfill/dist/browser-polyfill.js");
+      if (existsSync(polyfillSrc)) {
+        copyFileSync(polyfillSrc, resolve(root, "dist/browser-polyfill.js"));
       }
     },
   };
