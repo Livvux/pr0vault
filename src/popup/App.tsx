@@ -4,7 +4,7 @@ import { Search } from "./Search";
 import { ExportPanel } from "./Export";
 import { CollectionsPanel } from "./Collections";
 import { LogPanel } from "./Log";
-import type { VaultStats } from "../shared/types";
+import { isVaultStats, type VaultStats } from "../shared/types";
 import { isErrorResponse } from "../shared/dispatch";
 import { logErr } from "../shared/logger";
 import type {
@@ -25,14 +25,19 @@ const stats = signal<VaultStats>({
 const syncState = signal<"idle" | "syncing" | "error">("idle");
 const syncProgress = signal<SyncProgressMessage | null>(null);
 
+function setStats(v: unknown) {
+  if (isVaultStats(v)) {
+    stats.value = v;
+  } else if (isErrorResponse(v)) {
+    logErr("Popup", `GET_STATS fehlgeschlagen: ${v.error}`);
+  }
+  // sonst (malformt/undefined): aktuellen Wert behalten
+}
+
 function refreshStats() {
   chrome.runtime.sendMessage({ type: "GET_STATS" }, (response) => {
     if (chrome.runtime.lastError) return;
-    if (isErrorResponse(response)) {
-      logErr("Popup", `GET_STATS fehlgeschlagen: ${response.error}`);
-      return; // Default-Nullen behalten → kein Crash, sauberer Empty-State
-    }
-    if (response) stats.value = response as VaultStats;
+    setStats(response);
   });
 }
 
@@ -44,7 +49,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "SYNC_COMPLETE") {
     syncState.value = "idle";
     syncProgress.value = null;
-    stats.value = (msg as SyncCompleteMessage).stats;
+    setStats((msg as SyncCompleteMessage).stats);
   }
 });
 
