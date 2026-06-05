@@ -1,5 +1,6 @@
 import { signal } from "@preact/signals";
 import { useEffect, useCallback } from "preact/hooks";
+import { isErrorResponse } from "../shared/dispatch";
 
 const query = signal("");
 const results = signal<{ score: number; item: { content: string; itemId?: number; name?: string; created?: number; _type?: string }; matches?: unknown[] }[]>([]);
@@ -25,6 +26,11 @@ export function Search() {
         searching.value = false;
         if (chrome.runtime.lastError) {
           error.value = chrome.runtime.lastError.message ?? "Unbekannter Fehler";
+          return;
+        }
+        if (isErrorResponse(response)) {
+          error.value = response.error;
+          results.value = [];
           return;
         }
         if (response?.results) {
