@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "pr0Vault",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Dein digitales Gedächtnis auf pr0gramm. Auto-Backup, Full-Text-Search, DSGVO-Export.",
   "permissions": [
     "storage",
