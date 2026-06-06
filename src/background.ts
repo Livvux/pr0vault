@@ -580,28 +580,45 @@ async function syncCollectionItems(fromPopup: boolean) {
   return totalNew;
 }
 
+// IMPORTANT: This uses /inbox/pending, NOT /inbox/all.
+//
+// /inbox/all has a SIDE EFFECT — it marks every message on the page as read
+// on the server (pr0gramm's design: viewing the inbox = acknowledging it).
+// Calling it from a backup tool would silently clear the user's unread badge
+// and lose the visual distinction between "unread" and "already seen".
+// Verified live: 2 unread → 0 unread after one /inbox/all call.
+//
+// /inbox/pending only returns unread messages and does not silently
+// acknowledge them in a way that clears the inbox. The trade-off is
+// incremental coverage: only currently-pending (unread) messages are
+// backed up. After they get auto-marked by the user actually reading
+// the inbox on pr0gramm.com, they will not be re-fetched on the next
+// sync — but the local copy is already saved. Subsequent syncs only
+// pick up *new* unread messages.
+//
+// This is the best the pr0gramm API allows: there is no endpoint that
+// returns the full message history without a mark-as-read side effect.
 async function syncInbox(_me: string) {
   const lastMeta = await db.meta.get("lastInboxTs");
   const lastTs = (lastMeta?.value as number) || 0;
   const isIncremental = lastTs > 0;
 
-  let older: number | undefined = undefined;
   let totalNew = 0;
   let page = 0;
-  const MAX_PAGES = 1000; // ~100k messages at 100/page
+  const MAX_PAGES = 1000; // ~100k unread at 100/page (extreme case)
 
-  logSync("SW", `syncInbox start (incremental=${isIncremental}, lastTs=${lastTs})`);
+  logSync("SW", `syncInbox start via /inbox/pending (incremental=${isIncremental}, lastTs=${lastTs})`);
 
   while (page < MAX_PAGES) {
-    const params: Record<string, string> = {};
-    if (older !== undefined) params.older = String(older);
-
-    const data = (await fetchAPI("/inbox/all", params)) as Record<string, unknown> | null;
+    const data = (await fetchAPI("/inbox/pending")) as Record<string, unknown> | null;
     if (!data) { logSync("SW", `syncInbox: empty page ${page}`); break; }
     if (data.error) { logErr("SW", `syncInbox API error: ${String(data.error)}`); break; }
 
     const messages = data.messages as import("./shared/types").Message[] | undefined;
-    if (!messages || messages.length === 0) { logSync("SW", `syncInbox: no more messages at page ${page}`); break; }
+    if (!messages || messages.length === 0) {
+      logSync("SW", `syncInbox: no more pending at page ${page} — done`);
+      break;
+    }
 
     // Dedupe + incremental cutoff
     const knownIds = new Set(
@@ -622,26 +639,17 @@ async function syncInbox(_me: string) {
 
     page++;
 
-    // Stop conditions: API end OR pagination not advancing
-    if (data.atEnd) break;
-    const nextOlder = messages[messages.length - 1].created;
-    if (older !== undefined && nextOlder >= older) {
-      logErr("SW", `syncInbox: pagination not advancing (older=${older}, next=${nextOlder}) — stop`);
-      break;
-    }
-    // Incremental: stop when an entire page is older than our cutoff AND known.
-    if (isIncremental && filtered.length === 0 && messages.every(m => m.created <= lastTs)) {
-      logSync("SW", `syncInbox: reached incremental cutoff at page ${page}`);
+    // Safety: stop if pagination produces no new rows (prevents runaway loop).
+    if (filtered.length === 0 && page > 1) {
+      logSync("SW", `syncInbox: page ${page} returned 0 new — done`);
       break;
     }
 
-    older = nextOlder;
     await new Promise(r => setTimeout(r, 300));
   }
 
   if (page >= MAX_PAGES) logErr("SW", `syncInbox: hit MAX_PAGES safety stop`);
 
-  // Track highest seen timestamp
   if (totalNew > 0) {
     const maxRow = await db.messages.orderBy("created").last();
     if (maxRow) await db.meta.put({ key: "lastInboxTs", value: maxRow.created });

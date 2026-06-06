@@ -110,8 +110,20 @@ schlägt der Action-Verify-Step fehl.
   `after=<ts>` für neuere. State (`before`/`after`) muss **außerhalb** der
   while-Loop leben, sonst wird Page 1 endlos neu geholt.
 
-- **`/api/inbox/pending`** = nur ungelesene Messages. Für DSGVO-Export
-  unbrauchbar. **`/api/inbox/all`** mit `older=<ts>` Pagination nutzen.
+- **`/api/inbox/pending`** = nur ungelesene Messages, **kein mark-as-read
+  Side-Effect** (soweit wir wissen). Das ist der einzige Endpoint, den der
+  Backup nutzen DARF.
+- **`/api/inbox/all`** = listet ALLE Messages (gelesen + ungelesen) —
+  hat aber einen **kritischen Side-Effect**: jeder Call markiert die
+  zurückgegebenen Messages als gelesen. Live verifiziert: 2 unread
+  → 0 unread nach einem `/inbox/all` Call. Für ein Backup-Tool ist das
+  inakzeptabel (User verliert den unread-Badge). Auch `markAsRead=false`
+  und andere Param-Kombinationen existieren nicht als Opt-out.
+- **Konsequenz für DSGVO-Export**: Wir sichern nur die ungelesenen
+  Messages. Nach dem ersten Sync werden sie vom User in der pr0gramm-UI
+  ohnehin als gelesen markiert; ein zweiter Sync findet sie nicht mehr
+  (sind in der DB aber nicht re-fetchable). Es gibt **keinen** pr0gramm-
+  Endpoint, der die vollständige Histothek ohne Side-Effect liefert.
 
 - **`/api/collections/get`** liefert `isPublic`/`isDefault` als `0|1`
   (number), nicht boolean. `isCurated` fehlt — manuell `false` setzen.
