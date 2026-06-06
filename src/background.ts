@@ -580,82 +580,138 @@ async function syncCollectionItems(fromPopup: boolean) {
   return totalNew;
 }
 
-// IMPORTANT: This uses /inbox/pending, NOT /inbox/all.
+// Two-step strategy that has NO mark-as-read side effect:
 //
-// /inbox/all has a SIDE EFFECT — it marks every message on the page as read
-// on the server (pr0gramm's design: viewing the inbox = acknowledging it).
-// Calling it from a backup tool would silently clear the user's unread badge
-// and lose the visual distinction between "unread" and "already seen".
-// Verified live: 2 unread → 0 unread after one /inbox/all call.
+// 1. GET /inbox/conversations  → list of all conversation threads
+//    (paginated with `older=<unix-ts>`). Non-marking.
+// 2. Per conversation: GET /inbox/messages?with=<name>  → all messages
+//    in that thread, paginated with `older=<unix-ts>`. Non-marking.
 //
-// /inbox/pending only returns unread messages and does not silently
-// acknowledge them in a way that clears the inbox. The trade-off is
-// incremental coverage: only currently-pending (unread) messages are
-// backed up. After they get auto-marked by the user actually reading
-// the inbox on pr0gramm.com, they will not be re-fetched on the next
-// sync — but the local copy is already saved. Subsequent syncs only
-// pick up *new* unread messages.
+// Verified live (3 calls of each): unread-pending count stays at 0
+// before/after. The mark-as-read happens only via /inbox/all (which the
+// pr0gramm web UI calls when the user clicks "Alle" — a user-driven
+// action we never trigger).
 //
-// This is the best the pr0gramm API allows: there is no endpoint that
-// returns the full message history without a mark-as-read side effect.
+// Trade-off vs. /inbox/pending: more HTTP calls (one per conversation
+// thread plus pagination per thread), so initial backfill is slower.
+// For 30 conversations × ~300 messages each, expect ~120 calls +
+// 30 conversation-list pages ≈ 45 s on a 300 ms throttle. Worth it.
 async function syncInbox(_me: string) {
-  const lastMeta = await db.meta.get("lastInboxTs");
-  const lastTs = (lastMeta?.value as number) || 0;
-  const isIncremental = lastTs > 0;
+  logSync("SW", `syncInbox start via /inbox/conversations + /inbox/messages (no side effect)`);
 
+  const totalNew = await syncInboxConversations();
+
+  logSync("SW", `syncInbox done: ${totalNew} new`);
+  return totalNew;
+}
+
+async function syncInboxConversations(): Promise<number> {
+  let totalNew = 0;
+
+  // Step 1: enumerate all conversations
+  const conversations: { name: string; lastMessage: number; unreadCount: number }[] = [];
+  let convOlder: number | undefined = undefined;
+  let convPage = 0;
+  const MAX_CONV_PAGES = 200; // 200 × 30 = 6000 conversations (extreme case)
+
+  while (convPage < MAX_CONV_PAGES) {
+    const params: Record<string, string> = {};
+    if (convOlder !== undefined) params.older = String(convOlder);
+
+    const data = (await fetchAPI("/inbox/conversations", params)) as Record<string, unknown> | null;
+    if (!data || data.error) { logErr("SW", `syncInbox conv API error: ${JSON.stringify(data)}`); break; }
+
+    const convs = (data.conversations as any[] | undefined) ?? [];
+    if (convs.length === 0) break;
+    for (const c of convs) {
+      if (c.name) conversations.push({ name: c.name, lastMessage: c.lastMessage || 0, unreadCount: c.unreadCount || 0 });
+    }
+    convPage++;
+    if (data.atEnd) break;
+    const oldest = Math.min(...convs.map(c => c.lastMessage || 0));
+    if (oldest <= 0 || (convOlder !== undefined && oldest >= convOlder)) break;
+    convOlder = oldest;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  logSync("SW", `syncInbox: ${conversations.length} conversations (${convPage} pages)`);
+
+  // Step 2: per conversation, fetch all messages
+  for (const conv of conversations) {
+    const newCount = await syncConversationMessages(conv.name);
+    totalNew += newCount;
+  }
+
+  return totalNew;
+}
+
+async function syncConversationMessages(name: string): Promise<number> {
+  let older: number | undefined = undefined;
   let totalNew = 0;
   let page = 0;
-  const MAX_PAGES = 1000; // ~100k unread at 100/page (extreme case)
-
-  logSync("SW", `syncInbox start via /inbox/pending (incremental=${isIncremental}, lastTs=${lastTs})`);
+  const MAX_PAGES = 1000; // ~100k messages per conversation (extreme)
 
   while (page < MAX_PAGES) {
-    const data = (await fetchAPI("/inbox/pending")) as Record<string, unknown> | null;
-    if (!data) { logSync("SW", `syncInbox: empty page ${page}`); break; }
-    if (data.error) { logErr("SW", `syncInbox API error: ${String(data.error)}`); break; }
+    const params: Record<string, string> = { with: name };
+    if (older !== undefined) params.older = String(older);
+
+    const data = (await fetchAPI("/inbox/messages", params)) as Record<string, unknown> | null;
+    if (!data) { logSync("SW", `syncInbox[${name}]: empty page ${page}`); break; }
+    if (data.error) { logErr("SW", `syncInbox[${name}] API error: ${String(data.error)}`); break; }
 
     const messages = data.messages as import("./shared/types").Message[] | undefined;
-    if (!messages || messages.length === 0) {
-      logSync("SW", `syncInbox: no more pending at page ${page} — done`);
-      break;
-    }
+    if (!messages || messages.length === 0) { logSync("SW", `syncInbox[${name}]: no more at page ${page}`); break; }
 
-    // Dedupe + incremental cutoff
+    // Map the pr0gramm response into our Message shape. The /inbox/messages
+    // shape is slightly different from /inbox/all (adds `name` for the other
+    // user and lacks our `type` field) — we patch both into a consistent row.
     const knownIds = new Set(
       (await db.messages.where("id").anyOf(messages.map(m => m.id)).toArray()).map(m => m.id)
     );
-    const filtered = messages.filter(m =>
-      !knownIds.has(m.id) && (!isIncremental || m.created > lastTs)
-    );
+    const newRows: import("./shared/types").Message[] = [];
+    for (const m of messages) {
+      if (knownIds.has(m.id)) continue;
+      // pr0gramm raw response: `read` is number (1 / -1 / 0), `message` is the text.
+      // We coerce into our typed shape.
+      const raw = m as unknown as { read?: number; message?: string; name?: string };
+      newRows.push({
+        id: m.id,
+        type: m.type || "message",
+        name: raw.name || name,
+        message: raw.message || "",
+        itemId: m.itemId,
+        created: m.created || 0,
+        read: raw.read === 1,
+        syncedAt: Date.now(),
+      });
+    }
 
-    if (filtered.length > 0) {
-      const now = Date.now();
-      const synced = filtered.map((m) => ({ ...m, syncedAt: now }));
-      await db.messages.bulkPut(synced);
-      await db.meta.put({ key: "lastSync", value: now });
+    if (newRows.length > 0) {
+      await db.messages.bulkPut(newRows);
+      await db.meta.put({ key: "lastSync", value: Date.now() });
       invalidateFuseCache();
-      totalNew += synced.length;
+      totalNew += newRows.length;
     }
 
     page++;
 
-    // Safety: stop if pagination produces no new rows (prevents runaway loop).
-    if (filtered.length === 0 && page > 1) {
-      logSync("SW", `syncInbox: page ${page} returned 0 new — done`);
+    // Stop conditions
+    if (data.atEnd) break;
+    if (newRows.length === 0 && page > 1) {
+      logSync("SW", `syncInbox[${name}]: page ${page} returned 0 new — done`);
       break;
     }
-
-    await new Promise(r => setTimeout(r, 300));
+    const oldestCreated = Math.min(...messages.map(m => m.created || 0));
+    if (oldestCreated <= 0 || (older !== undefined && oldestCreated >= older)) {
+      logErr("SW", `syncInbox[${name}]: pagination not advancing — stop`);
+      break;
+    }
+    older = oldestCreated;
+    await new Promise(r => setTimeout(r, 200));
   }
 
-  if (page >= MAX_PAGES) logErr("SW", `syncInbox: hit MAX_PAGES safety stop`);
+  if (page >= MAX_PAGES) logErr("SW", `syncInbox[${name}]: hit MAX_PAGES safety stop`);
 
-  if (totalNew > 0) {
-    const maxRow = await db.messages.orderBy("created").last();
-    if (maxRow) await db.meta.put({ key: "lastInboxTs", value: maxRow.created });
-  }
-
-  logSync("SW", `syncInbox done: ${totalNew} new (pages: ${page})`);
+  logSync("SW", `syncInbox[${name}]: ${totalNew} new (pages: ${page})`);
   return totalNew;
 }
 

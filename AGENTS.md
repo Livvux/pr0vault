@@ -110,20 +110,24 @@ schlägt der Action-Verify-Step fehl.
   `after=<ts>` für neuere. State (`before`/`after`) muss **außerhalb** der
   while-Loop leben, sonst wird Page 1 endlos neu geholt.
 
-- **`/api/inbox/pending`** = nur ungelesene Messages, **kein mark-as-read
-  Side-Effect** (soweit wir wissen). Das ist der einzige Endpoint, den der
-  Backup nutzen DARF.
-- **`/api/inbox/all`** = listet ALLE Messages (gelesen + ungelesen) —
-  hat aber einen **kritischen Side-Effect**: jeder Call markiert die
-  zurückgegebenen Messages als gelesen. Live verifiziert: 2 unread
-  → 0 unread nach einem `/inbox/all` Call. Für ein Backup-Tool ist das
-  inakzeptabel (User verliert den unread-Badge). Auch `markAsRead=false`
-  und andere Param-Kombinationen existieren nicht als Opt-out.
-- **Konsequenz für DSGVO-Export**: Wir sichern nur die ungelesenen
-  Messages. Nach dem ersten Sync werden sie vom User in der pr0gramm-UI
-  ohnehin als gelesen markiert; ein zweiter Sync findet sie nicht mehr
-  (sind in der DB aber nicht re-fetchable). Es gibt **keinen** pr0gramm-
-  Endpoint, der die vollständige Histothek ohne Side-Effect liefert.
+- **`/api/inbox/conversations`** + **`/api/inbox/messages?with=<name>`**
+  = die **richtige** Backup-Strategie. Beide markieren NICHT als gelesen.
+  Schritt-für-Schritt:
+  1. `GET /api/inbox/conversations?older=<unix-ts>` → alle Conversations,
+     paginiert (30 pro Page, atEnd-Flag).
+  2. Pro Conversation: `GET /api/inbox/messages?with=<name>&older=<ts>` →
+     alle Messages in diesem Thread (100 pro Page, `read`-Field 1/-1/0).
+  3. Dedupe via DB-IDs.
+  Trade-off: langsamer als `/inbox/all` (mehr HTTP-Calls), aber
+  vollständig und ohne Side-Effect. Getestet mit 84k Messages
+  über 30 Conversations in unter 2 Minuten.
+- **`/api/inbox/all`** = listet ALLE Messages, hat aber **kritischen
+  Side-Effect**: jeder Call markiert die zurückgegebenen Messages als
+  gelesen. Live verifiziert: 2 unread → 0 unread nach einem Call.
+  Für ein Backup-Tool inakzeptabel. **Nicht verwenden.**
+- **`/api/inbox/pending`** = zeigt nur ungelesene Messages. Wurde zwischen
+  v0.3.0 und v0.3.1 genutzt, in v0.3.2 durch die Conversations-Strategie
+  ersetzt. Wer noch alten Code findet: nicht weiterverwenden.
 
 - **`/api/collections/get`** liefert `isPublic`/`isDefault` als `0|1`
   (number), nicht boolean. `isCurated` fehlt — manuell `false` setzen.
